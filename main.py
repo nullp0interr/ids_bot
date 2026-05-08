@@ -18,6 +18,8 @@ ALLOWED_IPS = os.getenv("ALLOWED_IPS", "").split(",")
 ALLOWED_USERS = os.getenv("ALLOWED_USERS", "").split(",")
 IGNORE_BAD_IP_CLIENTS = os.getenv("IGNORE_BAD_IP_CLIENTS", "").split(",")
 
+
+# в случае успеха или не успеха вот от этих ребят не надо присылать аллерты!
 WATCH_LIST = {
     ("itc", "Kronex_evrosklad-new"): "контроль доступа itc на Kronex_evrosklad-new",
     ("zruchna", "VetMedia-PBX-Sys"): "контроль доступа ZRUCHNA на VetMedia-PBX-Sys",
@@ -130,7 +132,9 @@ async def analyze_ssh_log(client, message):
             failed_attempts[ip] = 0
 
         if pair in WATCH_LIST:
-            alert_reason = f"[whatch_list]: {WATCH_LIST[pair]} [УСПЕХ]"
+            print(f"[whatch_list]: {WATCH_LIST[pair]} [УСПЕХ]")
+            return
+            #alert_reason = f"[whatch_list]: {WATCH_LIST[pair]} [УСПЕХ]"
         
         if not alert_reason:
             if not is_working_hours():
@@ -145,7 +149,9 @@ async def analyze_ssh_log(client, message):
         failed_attempts[ip] = failed_attempts.get(ip, 0) + 1
 
         if pair in WATCH_LIST:
-            alert_reason = f"[whatch_list]: {WATCH_LIST[pair]} [НЕУДАЧА]"
+            print(f"[whatch_list]: {WATCH_LIST[pair]} [НЕУДАЧА]")
+            return
+            #alert_reason = f"[whatch_list]: {WATCH_LIST[pair]} [НЕУДАЧА]"
 
         if not alert_reason:
             if failed_attempts[ip] > 2:
