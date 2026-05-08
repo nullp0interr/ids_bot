@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: ids_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: db_user_login
+      POSTGRES_PASSWORD: db_user_password123
+      POSTGRES_DB: ids_database
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  app:
+    build: .
+    container_name: ids_bot_container
+    restart: always
+    depends_on:
+      - db
+    environment:
+      - PYTHONUNBUFFERED=1
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+
+volumes:
+  pgdata:
