@@ -24,8 +24,6 @@ ALLOWED_IPS = os.getenv("ALLOWED_IPS", "").split(",")
 ALLOWED_USERS = os.getenv("ALLOWED_USERS", "").split(",")
 IGNORE_BAD_IP_CLIENTS = os.getenv("IGNORE_BAD_IP_CLIENTS", "").split(",")
 CPANEL_SKIP_IPS = os.getenv("CPANEL_SKIP_IPS", "").split(",")
-
-# исключения для уведомлений (atak_, dest_)
 ATAK_SKIP_IPS = os.getenv("ATAK_SKIP_IPS", "").split(",")
 
 WATCH_LIST = {
@@ -90,6 +88,7 @@ def is_working_hours():
         return True
     return False
 
+# Таймер для обычного SSH
 async def wait_for_success(client_ip, original_message):
     await asyncio.sleep(60)
     reason = "[Инцидент]: нет успешной авторизации за 60 секунд после ошибки"
@@ -100,9 +99,23 @@ async def wait_for_success(client_ip, original_message):
         except Exception as e: print(f"[!] Ошибка копирования в {chat}: {e}", flush=True)
     print(f"[ALLERT] {reason} | IP: {client_ip}", flush=True)
 
+# Таймер для WATCH_LIST
+async def wait_for_watchlist_success(client, client_ip, original_message, control_text):
+    await asyncio.sleep(60)
+    reason = f"КОНТРОЛЬ ДОСТУПА: {control_text} [НЕТ УСПЕШНОГО ВХОДА ЗА 60 СЕК]"
+    await save_alert(reason, original_message.text, client_ip)
+    await register_incident(client_ip, reason)
+    for chat in TARGET_CHATS:
+        try:
+            await client.send_message(chat, f"***{reason}***")
+            await original_message.copy(chat)
+        except Exception as e: print(f"[!] Ошибка в {chat}: {e}", flush=True)
+    print(f"[ALLERT] {reason} | IP: {client_ip}", flush=True)
+
+# Таймер для АТАК
 async def wait_for_atak_resolution(client, src_ip, original_message):
     await asyncio.sleep(60)
-    reason = f"🚨 [Инцидент]: Зафиксирована WEB-атака с IP: {src_ip} (нет подтверждения DST за 60 сек)"
+    reason = f"[Инцидент]: Зафиксирована активность с IP: {src_ip} (нет подтверждения DST за 60 сек)"
     await save_alert(reason, original_message.text, src_ip)
     await register_incident(src_ip, reason)
     for chat in TARGET_CHATS:
@@ -118,7 +131,6 @@ async def analyze_ssh_log(client, message):
     text = message.text or message.caption or ""
     if not text: return
 
-    # ПЕРЕХВАТЧИК АТАК (СВЯЗКА SRC и DST) 
     if "WEB_SRC_Atak_" in text:
         found_ip = re.search(r"WEB_SRC_Atak_(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})", text)
         if found_ip:
@@ -166,7 +178,7 @@ async def analyze_ssh_log(client, message):
                 print(f"[log] игнор {ip_val} по системному ключу Cpanel", flush=True)
                 return
             else:
-                alert_reason = f"🚨 Подозрительная активность Cpanel с НЕИЗВЕСТНОГО IP: {ip_val}"
+                alert_reason = f"Подозрительная активность Cpanel с НЕИЗВЕСТНОГО IP: {ip_val}"
                 print(f"[!] АХТУНГ: {alert_reason}", flush=True)
                 await save_alert(alert_reason, text, ip_val)
                 for chat in TARGET_CHATS:
@@ -211,13 +223,18 @@ async def analyze_ssh_log(client, message):
 
         if pair in WATCH_LIST:
             print(f"[whatch_list]: {WATCH_LIST[pair]} [НЕУДАЧА]", flush=True)
-            alert_reason = f"🚨 КОНТРОЛЬ ДОСТУПА: {WATCH_LIST[pair]} [НЕУДАЧНАЯ ПОПЫТКА]"
+            if ip not in pending_checks:
+                print(f"[*] Запуск таймера 60с для WATCH_LIST ({ip})", flush=True)
+                task = asyncio.create_task(wait_for_watchlist_success(client, ip, message, WATCH_LIST[pair]))
+                pending_checks[ip] = task
+            return
             
         elif not alert_reason:
             if failed_attempts[ip] > 2:
                 alert_reason = f"Обнаружено более 2-х неудачных попыток ({failed_attempts[ip]})"
                 await register_incident(ip, alert_reason)
 
+        # таймер True Positive для остальных
         if user not in IGNORE_BAD_IP_CLIENTS:
             if ip not in ALLOWED_IPS and not parsed["method_is_key"]:
                 if ip not in pending_checks:
