@@ -14,10 +14,14 @@ CHAT_ID = int(os.getenv("CHAT_ID", 0))
 ALERT_CHAT_ID = int(os.getenv("ALERT_CHAT_ID", 0))
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+other_chats_raw = os.getenv("OTHER_CHATS", "")
+OTHER_CHATS = [int(i.strip()) for i in other_chats_raw.split(",") if i.strip()]
+
+TARGET_CHATS = list(set([ALERT_CHAT_ID, -5224512305] + OTHER_CHATS))
+
 ALLOWED_IPS = os.getenv("ALLOWED_IPS", "").split(",")
 ALLOWED_USERS = os.getenv("ALLOWED_USERS", "").split(",")
 IGNORE_BAD_IP_CLIENTS = os.getenv("IGNORE_BAD_IP_CLIENTS", "").split(",")
-
 
 # в случае успеха или не успеха вот от этих ребят не надо присылать аллерты!
 WATCH_LIST = {
@@ -29,8 +33,8 @@ WATCH_LIST = {
     ("zruchna", "PBX-Ulc-LXC"): "контроль доступа zruchna на PBX-Ulc-LXC",
     ("itcenter", "pbx-bydom-lxc"): "контроль доступа itcenter на pbx-bydom-lxc"
 }
-db_pool = None
 
+db_pool = None
 failed_attempts = {} 
 pending_checks = {}  
 
@@ -100,8 +104,14 @@ async def wait_for_success(client_ip, original_message):
     reason = "[Инцидент]: нет успешной авторизации за 60 секунд после ошибки"
     await save_alert(reason, original_message.text, client_ip)
     await register_incident(client_ip, reason)
-    await original_message.copy(ALERT_CHAT_ID)
-    print(f"[ALLERT] {reason} | IP: {client_ip}")
+    
+    for chat in TARGET_CHATS:
+        try:
+            await original_message.copy(chat)
+        except Exception as e:
+            print(f"[!] Ошибка копирования в чат {chat}: {e}", flush=True)
+            
+    print(f"[ALLERT] {reason} | IP: {client_ip}", flush=True)
 
 @app.on_message(filters.chat(CHAT_ID)) 
 async def analyze_ssh_log(client, message):
@@ -117,10 +127,10 @@ async def analyze_ssh_log(client, message):
     zabbix_name = parsed["zabbix_name"]
     
     if not user or not ip:
-        print(f"[log] Формат не SSH:\n{text}\n")
+        print(f"[log] Формат не SSH:\n{text}\n", flush=True)
         return 
     
-    print(f"\n[log] юзер: {user} | Zabbix: {zabbix_name} | IP: {ip}")
+    print(f"\n[log] юзер: {user} | Zabbix: {zabbix_name} | IP: {ip}", flush=True)
     
     alert_reason = None
     pair = (user, zabbix_name)
@@ -134,9 +144,8 @@ async def analyze_ssh_log(client, message):
             failed_attempts[ip] = 0
 
         if pair in WATCH_LIST:
-            print(f"[whatch_list]: {WATCH_LIST[pair]} [УСПЕХ]")
+            print(f"[whatch_list]: {WATCH_LIST[pair]} [УСПЕХ]", flush=True)
             return
-            #alert_reason = f"[whatch_list]: {WATCH_LIST[pair]} [УСПЕХ]"
         
         if not alert_reason:
             if not is_working_hours():
@@ -151,45 +160,47 @@ async def analyze_ssh_log(client, message):
         failed_attempts[ip] = failed_attempts.get(ip, 0) + 1
 
         if pair in WATCH_LIST:
-            print(f"[whatch_list]: {WATCH_LIST[pair]} [НЕУДАЧА]")
+            print(f"[whatch_list]: {WATCH_LIST[pair]} [НЕУДАЧА]", flush=True)
             return
-            #alert_reason = f"[whatch_list]: {WATCH_LIST[pair]} [НЕУДАЧА]"
 
         if not alert_reason:
             if failed_attempts[ip] > 2:
                 alert_reason = f"Обнаружено более 2-х неудачных попыток ({failed_attempts[ip]})"
                 await register_incident(ip, alert_reason)
 
-        # таймер True Positive,если юзер не в игноре
+        # Таймер True Positive, запускаем если не в игноре
         if user not in IGNORE_BAD_IP_CLIENTS:
             if ip not in ALLOWED_IPS and not parsed["method_is_key"]:
                 if ip not in pending_checks:
-                    print(f"[*] Запуск таймера 60с для {ip}")
+                    print(f"[*] Запуск таймера 60с для {ip}", flush=True)
                     task = asyncio.create_task(wait_for_success(ip, message))
                     pending_checks[ip] = task
 
     # ОТПРАВКА АЛЕРТА
     if alert_reason:
-        print(f"[!] АХТУНГ: {alert_reason}")
+        print(f"[!] АХТУНГ: {alert_reason}", flush=True)
         await save_alert(alert_reason, text, ip)
-        # здесь отправляю текстовый заголовок и копию сообщения в нашу группу
-        # чат с Валерой!!!
-        await client.send_message(ALERT_CHAT_ID, f"***{alert_reason}***")
-        await message.copy(ALERT_CHAT_ID)
+        
+        for chat in TARGET_CHATS:
+            try:
+                await client.send_message(chat, f"***{alert_reason}***")
+                await message.copy(chat)
+            except Exception as e:
+                print(f"[!] Не удалось пульнуть алерт в чат {chat}: {e}", flush=True)
 
 if __name__ == "__main__":
-    print("Подключение к базе данных PostgreSQL...")
+    print("Подключение к базе данных PostgreSQL...", flush=True)
     try:
         app.loop.run_until_complete(init_db())
     except Exception as e:
         print(f"Ошибка БД: {e}"); exit(1)
 
-    print("Бот запущен. Скан начат.")
+    print("Бот запущен. Скан начат.", flush=True)
 
     while True:
         try:
             app.run()
         except Exception as e:
-            print(f"Ошибка: {e}")
+            print(f"Ошибка: {e}", flush=True)
             if "already waiting" in str(e): continue
             asyncio.sleep(5)
