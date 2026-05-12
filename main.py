@@ -272,7 +272,7 @@ async def start_bot():
     
     # сообщениео успешном старте или перезапуске
     startup_msg = "IDS Бот успешно запущен/перезагружен"
-    for chat in TARGET_CHAT:
+    for chat in TARGET_CHATS:
         try:
             await app.send_message(chat, startup_msg)
         except Exception as e:
