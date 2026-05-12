@@ -125,6 +125,17 @@ async def wait_for_atak_resolution(client, src_ip, original_message):
         except Exception as e: print(f"[!] Ошибка алерта атаки в {chat}: {e}", flush=True)
     print(f"[ALLERT] {reason} | IP: {src_ip}", flush=True)
 
+@app.on_message(filters.command(["status", "ping"]))
+async def check_bot_status(client, message):
+    if message.chat.id in TARGET_CHATS or message.chat.id in LISTEN_CHATS:
+        uptime_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        await message.reply_text(
+            f"**[ СТАТУС: БОТ АКТИВЕН ]**\n"
+            f"Время на сервере: {uptime_time}\n"
+            f"Слушаю чатов: {len(LISTEN_CHATS)}\n"
+            f"Шлю алерты в чатов: {len(TARGET_CHATS)}\n"
+            f"Мониторинг логов активен"
+        )
 @app.on_message(filters.chat(LISTEN_CHATS)) 
 async def analyze_ssh_log(client, message):
     if not (message.from_user and message.from_user.is_bot): return 
@@ -251,18 +262,7 @@ async def analyze_ssh_log(client, message):
                 await client.send_message(chat, f"***{alert_reason}***")
                 await message.copy(chat)
             except Exception as e: print(f"[!] Ошибка в {chat}: {e}", flush=True)
-# команда /status
-@app.on_message(filters.command("status") | filters.command("ping"))
-async def check_bot_status(client, message):
-    if message.chat.id in TARGET_CHATS or message.chat.id in LISTEN_CHATS:
-        uptime_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        await message.reply_text(
-            f"[ СТАТУС: БОТ АКТИВЕН ]\n"
-            f"Время на сервере: {uptime_time}\n"
-            f"Слушаю чатов: {len(LISTEN_CHATS)}\n"
-            f"Шлю алерты в чатов: {len(TARGET_CHATS)}\n"
-            f"Мониторинг логов активен"
-        )
+
 async def start_bot():
     print("Подключение к базе данных PostgreSQL", flush=True)
     await init_db()
@@ -270,9 +270,9 @@ async def start_bot():
     await app.start()
     print("Бот запущен. Скан начат.", flush=True)
     
-    # отправка нотифика о успешном старте или перезапуске
-    startup_msg = " **system** IDS Бот успешно запущен."
-    for chat in TARGET_CHATS:
+    # сообщениео успешном старте или перезапуске
+    startup_msg = "**Системное сообщение:** IDS Бот успешно запущен/перезагружен. Мониторинг логов активирован."
+    for chat in TARGET_CHAT:
         try:
             await app.send_message(chat, startup_msg)
         except Exception as e:
@@ -280,6 +280,15 @@ async def start_bot():
 
     from pyrogram import idle
     await idle()
+    
+    # сообщение при выключении контейнера
+    shutdown_msg = "**Системное сообщение:** IDS Бот остановлен (выключен контейнер). Мониторинг ПРЕРВАН."
+    for chat in TARGET_CHATS:
+        try:
+            await app.send_message(chat, shutdown_msg)
+        except Exception as e:
+            pass
+
     await app.stop()
 
 if __name__ == "__main__":
