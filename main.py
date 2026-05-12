@@ -14,15 +14,19 @@ API_HASH = os.getenv("API_HASH")
 ALERT_CHAT_ID = int(os.getenv("ALERT_CHAT_ID", 0))
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+# ЧАТЫ
 listen_raw = os.getenv("LISTEN_CHATS", "")
 LISTEN_CHATS = [int(i.strip()) for i in listen_raw.split(",") if i.strip()]
-
 TARGET_CHATS = [ALERT_CHAT_ID]
 
+# СПИСКИ
 ALLOWED_IPS = os.getenv("ALLOWED_IPS", "").split(",")
 ALLOWED_USERS = os.getenv("ALLOWED_USERS", "").split(",")
 IGNORE_BAD_IP_CLIENTS = os.getenv("IGNORE_BAD_IP_CLIENTS", "").split(",")
 CPANEL_SKIP_IPS = os.getenv("CPANEL_SKIP_IPS", "").split(",")
+
+# исключения для уведомлений (atak_, dest_)
+ATAK_SKIP_IPS = os.getenv("ATAK_SKIP_IPS", "").split(",")
 
 WATCH_LIST = {
     ("itc", "Kronex_evrosklad-new"): "контроль доступа itc на Kronex_evrosklad-new",
@@ -37,6 +41,7 @@ WATCH_LIST = {
 db_pool = None
 failed_attempts = {} 
 pending_checks = {}  
+pending_attacks = {}
 
 app = Client("my_account", api_id=API_ID, api_hash=API_HASH)
 
@@ -84,7 +89,6 @@ def is_working_hours():
         return True
     return False
 
-# Если за 60 секунд никто не зашел значит реально инцидент, рассылаем всем
 async def wait_for_success(client_ip, original_message):
     await asyncio.sleep(60)
     reason = "[Инцидент]: нет успешной авторизации за 60 секунд после ошибки"
@@ -95,22 +99,73 @@ async def wait_for_success(client_ip, original_message):
         except Exception as e: print(f"[!] Ошибка копирования в {chat}: {e}", flush=True)
     print(f"[ALLERT] {reason} | IP: {client_ip}", flush=True)
 
+async def wait_for_atak_resolution(client, src_ip, original_message):
+    await asyncio.sleep(60)
+    reason = f"🚨 [Инцидент]: Зафиксирована WEB-атака с IP: {src_ip} (нет подтверждения DST за 60 сек)"
+    await save_alert(reason, original_message.text, src_ip)
+    await register_incident(src_ip, reason)
+    for chat in TARGET_CHATS:
+        try: 
+            await client.send_message(chat, f"***{reason}***")
+            await original_message.copy(chat)
+        except Exception as e: print(f"[!] Ошибка алерта атаки в {chat}: {e}", flush=True)
+    print(f"[ALLERT] {reason} | IP: {src_ip}", flush=True)
+
 @app.on_message(filters.chat(LISTEN_CHATS)) 
 async def analyze_ssh_log(client, message):
     if not (message.from_user and message.from_user.is_bot): return 
     text = message.text or message.caption or ""
     if not text: return
 
+    # ПЕРЕХВАТЧИК АТАК (СВЯЗКА SRC и DST) 
+    if "WEB_SRC_Atak_" in text:
+        found_ip = re.search(r"WEB_SRC_Atak_(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})", text)
+        if found_ip:
+            src_ip = found_ip.group(1)
+            
+            # ПРОВЕРКА НА ИСКЛЮЧЕНИЕ АТАКИ
+            if src_ip in ATAK_SKIP_IPS:
+                print(f"[log] Игнор WEB_SRC_Atak от {src_ip} (в списке исключений ATAK_SKIP_IPS)", flush=True)
+                return
+
+            zabbix_node = text.strip().split('\n')[0].strip()
+            
+            print(f"[*] Запуск таймера 60с для атаки SRC IP: {src_ip} (узел {zabbix_node})", flush=True)
+            task = asyncio.create_task(wait_for_atak_resolution(client, src_ip, message))
+            pending_attacks[zabbix_node] = task
+        return 
+
+    if "WEB_DST_Atak_" in text:
+        found_ip = re.search(r"WEB_DST_Atak_(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})", text)
+        if found_ip:
+            dst_ip = found_ip.group(1)
+            
+            # ПРОВЕРКА НА ИСКЛЮЧЕНИЕ АТАКИ
+            if dst_ip in ATAK_SKIP_IPS:
+                print(f"[log] Игнор WEB_DST_Atak на {dst_ip} (в списке исключений ATAK_SKIP_IPS)", flush=True)
+                return
+
+            zabbix_node = text.strip().split('\n')[0].strip() 
+            
+            if zabbix_node in pending_attacks:
+                print(f"[log] Получен DST IP: {dst_ip} (узел {zabbix_node}). Связка успешна, алерт отменен.", flush=True)
+                pending_attacks[zabbix_node].cancel()
+                del pending_attacks[zabbix_node]
+            else:
+                print(f"[log] Получен DST IP: {dst_ip}, но таймер SRC для {zabbix_node} не запускался.", flush=True)
+        return 
+
+    # ПЕРЕХВАТЧИК CPANEL 
     SKIP_KEYWORDS = ["Cpanel_SSH_Actiivty"]
     if any(key in text for key in SKIP_KEYWORDS):
         found_ip = re.search(r"(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})", text)
         if found_ip:
             ip_val = found_ip.group(1)
             if ip_val in CPANEL_SKIP_IPS:
-                print(f"[log] игнор {ip_val} по системному ключу", flush=True)
+                print(f"[log] игнор {ip_val} по системному ключу Cpanel", flush=True)
                 return
             else:
-                alert_reason = f"активность Cpanel с НЕИЗВЕСТНОГО IP: {ip_val}"
+                alert_reason = f"🚨 Подозрительная активность Cpanel с НЕИЗВЕСТНОГО IP: {ip_val}"
                 print(f"[!] АХТУНГ: {alert_reason}", flush=True)
                 await save_alert(alert_reason, text, ip_val)
                 for chat in TARGET_CHATS:
@@ -120,26 +175,8 @@ async def analyze_ssh_log(client, message):
                     except Exception as e: print(f"[!] Ошибка отправки: {e}", flush=True)
                 return
 
+    # СТАНДАРТНЫЙ ПАРСИНГ SSH 
     parsed = parse_ssh_message(text)
-
-    # атаки
-    if "Atak_" in text:
-        # смотрим айпи если етсь после слова atak
-        found_ip = re.search(r"Atak_(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})", text)
-        atk_ip = found_ip.group(1) if found_ip else "Неизвестный IP"
-        
-        alert_reason = f"(if atak) неизвестный  IP: {atk_ip}"
-        print(f"[!] АХТУНГ: {alert_reason}", flush=True)
-        await save_alert(alert_reason, text, atk_ip)
-        
-        for chat in TARGET_CHATS:
-            try:
-                await client.send_message(chat, f"***{alert_reason}***")
-                await message.copy(chat)
-            except Exception as e: 
-                print(f"[!] Ошибка отправки: {e}", flush=True)
-        return 
-        
     user, ip, zabbix_name = parsed["user"], parsed["ip"], parsed["zabbix_name"]
     
     if not user or not ip:
@@ -173,14 +210,13 @@ async def analyze_ssh_log(client, message):
 
         if pair in WATCH_LIST:
             print(f"[whatch_list]: {WATCH_LIST[pair]} [НЕУДАЧА]", flush=True)
-            return
-
-        if not alert_reason:
+            alert_reason = f"🚨 КОНТРОЛЬ ДОСТУПА: {WATCH_LIST[pair]} [НЕУДАЧНАЯ ПОПЫТКА]"
+            
+        elif not alert_reason:
             if failed_attempts[ip] > 2:
                 alert_reason = f"Обнаружено более 2-х неудачных попыток ({failed_attempts[ip]})"
                 await register_incident(ip, alert_reason)
 
-        # таймер True Positive, запускаем если не в игноре
         if user not in IGNORE_BAD_IP_CLIENTS:
             if ip not in ALLOWED_IPS and not parsed["method_is_key"]:
                 if ip not in pending_checks:
