@@ -121,6 +121,25 @@ async def analyze_ssh_log(client, message):
                 return
 
     parsed = parse_ssh_message(text)
+
+    # атаки
+    if "Atak_" in text:
+        # смотрим айпи если етсь после слова atak
+        found_ip = re.search(r"Atak_(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})", text)
+        atk_ip = found_ip.group(1) if found_ip else "Неизвестный IP"
+        
+        alert_reason = f"(if atak) неизвестный  IP: {atk_ip}"
+        print(f"[!] АХТУНГ: {alert_reason}", flush=True)
+        await save_alert(alert_reason, text, atk_ip)
+        
+        for chat in TARGET_CHATS:
+            try:
+                await client.send_message(chat, f"***{alert_reason}***")
+                await message.copy(chat)
+            except Exception as e: 
+                print(f"[!] Ошибка отправки: {e}", flush=True)
+        return 
+        
     user, ip, zabbix_name = parsed["user"], parsed["ip"], parsed["zabbix_name"]
     
     if not user or not ip:
