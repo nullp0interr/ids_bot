@@ -251,7 +251,18 @@ async def analyze_ssh_log(client, message):
                 await client.send_message(chat, f"***{alert_reason}***")
                 await message.copy(chat)
             except Exception as e: print(f"[!] Ошибка в {chat}: {e}", flush=True)
-
+# команда /status
+@app.on_message(filters.command("status") | filters.command("ping"))
+async def check_bot_status(client, message):
+    if message.chat.id in TARGET_CHATS or message.chat.id in LISTEN_CHATS:
+        uptime_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        await message.reply_text(
+            f"[ СТАТУС: БОТ АКТИВЕН ]\n"
+            f"Время на сервере: {uptime_time}\n"
+            f"Слушаю чатов: {len(LISTEN_CHATS)}\n"
+            f"Шлю алерты в чатов: {len(TARGET_CHATS)}\n"
+            f"Мониторинг логов активен"
+        )
 async def start_bot():
     print("Подключение к базе данных PostgreSQL", flush=True)
     await init_db()
