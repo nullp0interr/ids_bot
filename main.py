@@ -25,7 +25,9 @@ WATCH_LIST = {
     ("zruchna", "VetMedia-PBX-Sys"): "контроль доступа ZRUCHNA на VetMedia-PBX-Sys",
     ("itcenter", "Nemokna-new-ats"): "контроль доступа itcenter на Nemokna-new-ats",
     ("itcenter", "Confidens"): "контроль доступа itcenter на Confidens",
-    ("itcenter_sergeym", "Sonodin-new"): "контроль доступа itcenter_sergeym на Sonodin-new"
+    ("itcenter_sergeym", "Sonodin-new"): "контроль доступа itcenter_sergeym на Sonodin-new",
+    ("zruchna", "PBX-Ulc-LXC"): "контроль доступа zruchna на PBX-Ulc-LXC",
+    ("itcenter", "pbx-bydom-lxc"): "контроль доступа itcenter на pbx-bydom-lxc"
 }
 db_pool = None
 
