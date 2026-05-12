@@ -252,15 +252,29 @@ async def analyze_ssh_log(client, message):
                 await message.copy(chat)
             except Exception as e: print(f"[!] Ошибка в {chat}: {e}", flush=True)
 
-if __name__ == "__main__":
-    print("Подключение к базе данных PostgreSQL...", flush=True)
-    try: app.loop.run_until_complete(init_db())
-    except Exception as e: print(f"Ошибка БД: {e}"); exit(1)
-
+async def start_bot():
+    print("Подключение к базе данных PostgreSQL", flush=True)
+    await init_db()
+    
+    await app.start()
     print("Бот запущен. Скан начат.", flush=True)
-
-    while True:
-        try: app.run()
+    
+    # отправка нотифика о успешном старте или перезапуске
+    startup_msg = " **system** IDS Бот успешно запущен."
+    for chat in TARGET_CHATS:
+        try:
+            await app.send_message(chat, startup_msg)
         except Exception as e:
-            if "already waiting" in str(e): continue
-            asyncio.sleep(5)
+            print(f"[!] Не удалось отправить сообщение о старте в {chat}: {e}")
+
+    from pyrogram import idle
+    await idle()
+    await app.stop()
+
+if __name__ == "__main__":
+    try: 
+        app.loop.run_until_complete(start_bot())
+    except KeyboardInterrupt:
+        print("Бот остановлен вручную.")
+    except Exception as e: 
+        print(f"Критическая ошибка: {e}")
