@@ -8,7 +8,7 @@ from pyrogram import Client, filters
 
 load_dotenv()
 
-# Секреты
+# секреты
 API_ID = int(os.getenv("API_ID", 0))
 API_HASH = os.getenv("API_HASH")
 ALERT_CHAT_ID = int(os.getenv("ALERT_CHAT_ID", 0))
@@ -41,6 +41,7 @@ db_pool = None
 failed_attempts = {} 
 pending_checks = {}  
 pending_attacks = {}
+last_success_time = {} # время последнего успешного входа по IP
 
 app = Client("my_account", api_id=API_ID, api_hash=API_HASH)
 
@@ -140,6 +141,7 @@ async def check_bot_status(client, message):
             f"Шлю алерты в чатов: {len(TARGET_CHATS)}\n"
             f"Мониторинг логов активен"
         )
+        
 @app.on_message(filters.chat(LISTEN_CHATS)) 
 async def analyze_ssh_log(client, message):
     if not (message.from_user and message.from_user.is_bot): return 
@@ -151,9 +153,8 @@ async def analyze_ssh_log(client, message):
         if found_ip:
             src_ip = found_ip.group(1)
             
-            # ПРОВЕРКА НА ИСКЛЮЧЕНИЕ АТАКИ
             if src_ip in ATAK_SKIP_IPS:
-                print(f"[log] Игнор WEB_SRC_Atak от {src_ip} (в списке исключений ATAK_SKIP_IPS)", flush=True)
+                print(f"[log] Игнор WEB_SRC_Atak от {src_ip} (в списке исключений)", flush=True)
                 return
 
             zabbix_node = text.strip().split('\n')[0].strip()
@@ -168,9 +169,8 @@ async def analyze_ssh_log(client, message):
         if found_ip:
             dst_ip = found_ip.group(1)
             
-            # ПРОВЕРКА НА ИСКЛЮЧЕНИЕ АТАКИ
             if dst_ip in ATAK_SKIP_IPS:
-                print(f"[log] Игнор WEB_DST_Atak на {dst_ip} (в списке исключений ATAK_SKIP_IPS)", flush=True)
+                print(f"[log] Игнор WEB_DST_Atak на {dst_ip} (в списке исключений)", flush=True)
                 return
 
             zabbix_node = text.strip().split('\n')[0].strip() 
@@ -216,8 +216,10 @@ async def analyze_ssh_log(client, message):
     alert_reason = None
     pair = (user, zabbix_name)
 
-    # ЛОГИКА УСПЕШНОЙ АВТОРИЗАЦИИ
+    # ЛОГИКА УСПЕШНОЙ АВТОРИЗАЦИИ 
     if parsed["is_success"]:
+        last_success_time[ip] = datetime.now().timestamp()
+        
         if ip in pending_checks:
             pending_checks[ip].cancel()
             del pending_checks[ip]
@@ -232,8 +234,13 @@ async def analyze_ssh_log(client, message):
             elif user == "root" and not parsed["method_is_key"]: alert_reason = "root авторизовался НЕ по ключу"
             elif user != "root" and user not in ALLOWED_USERS: alert_reason = f"пользователь {user} не в списке разрешенных"
 
-    # ЛОГИКА НЕУДАЧНОЙ АВТОРИЗАЦИИ
+    # ЛОГИКА НЕУДАЧНОЙ АВТОРИЗАЦИИ 
     else:
+        # ИМУННИТЕТ НА 5 МИНУТ если этот IP успешно заходил менее 5 минут назад (300 сек) игнорим опечатки
+        if ip in last_success_time and (datetime.now().timestamp() - last_success_time[ip]) < 300:
+            print(f"[log] Игнор ошибки для {ip}: пользователь уже сидит на сервере (успех менее 5 мин назад)", flush=True)
+            return
+
         failed_attempts[ip] = failed_attempts.get(ip, 0) + 1
 
         if pair in WATCH_LIST:
@@ -249,7 +256,6 @@ async def analyze_ssh_log(client, message):
                 alert_reason = f"Обнаружено более 2-х неудачных попыток ({failed_attempts[ip]})"
                 await register_incident(ip, alert_reason)
 
-        # таймер True Positive для остальных
         if user not in IGNORE_BAD_IP_CLIENTS:
             if ip not in ALLOWED_IPS and not parsed["method_is_key"]:
                 if ip not in pending_checks:
@@ -274,7 +280,6 @@ async def start_bot():
     await app.start()
     print("Бот запущен. Скан начат.", flush=True)
     
-    # сообщениео успешном старте или перезапуске
     startup_msg = "IDS Бот успешно запущен/перезагружен"
     for chat in TARGET_CHATS:
         try:
@@ -285,7 +290,6 @@ async def start_bot():
     from pyrogram import idle
     await idle()
     
-    # сообщение при выключении контейнера
     shutdown_msg = "IDS БОТ остановлен (выключен контейнер)"
     for chat in TARGET_CHATS:
         try:
