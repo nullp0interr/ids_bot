@@ -89,7 +89,7 @@ def is_working_hours():
     return False
 
 # Таймер для обычного SSH
-async def wait_for_success(client_ip, original_message):
+async def wait_for_success(client, client_ip, original_message):
     await asyncio.sleep(60)
     reason = "[Инцидент]: нет успешной авторизации за 60 секунд после ошибки"
     
@@ -102,7 +102,7 @@ async def wait_for_success(client_ip, original_message):
             await original_message.copy(chat)
         except Exception as e: print(f"[!] Ошибка копирования в {chat}: {e}", flush=True)
     print(f"[ALLERT] {reason} | IP: {client_ip}", flush=True)
-
+    
 # Таймер для WATCH_LIST
 async def wait_for_watchlist_success(client, client_ip, original_message, control_text):
     await asyncio.sleep(60)
