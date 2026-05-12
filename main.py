@@ -8,20 +8,20 @@ from pyrogram import Client, filters
 
 load_dotenv()
 
+# Секреты
 API_ID = int(os.getenv("API_ID", 0))
 API_HASH = os.getenv("API_HASH")
-CHAT_ID = int(os.getenv("CHAT_ID", 0))
 ALERT_CHAT_ID = int(os.getenv("ALERT_CHAT_ID", 0))
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-other_chats_raw = os.getenv("OTHER_CHATS", "")
-OTHER_CHATS = [int(i.strip()) for i in other_chats_raw.split(",") if i.strip()]
-TARGET_CHATS = list(set([ALERT_CHAT_ID, -5224512305] + OTHER_CHATS))
+listen_raw = os.getenv("LISTEN_CHATS", "")
+LISTEN_CHATS = [int(i.strip()) for i in listen_raw.split(",") if i.strip()]
+
+TARGET_CHATS = [ALERT_CHAT_ID]
 
 ALLOWED_IPS = os.getenv("ALLOWED_IPS", "").split(",")
 ALLOWED_USERS = os.getenv("ALLOWED_USERS", "").split(",")
 IGNORE_BAD_IP_CLIENTS = os.getenv("IGNORE_BAD_IP_CLIENTS", "").split(",")
-
 CPANEL_SKIP_IPS = os.getenv("CPANEL_SKIP_IPS", "").split(",")
 
 WATCH_LIST = {
@@ -69,7 +69,6 @@ def parse_ssh_message(text):
     ip_match = re.search(r"🌍 Клиент:\s*(.+)", text)
     method_match = re.search(r"🔑 Метод:\s*(.+)", text)
     zabbix_match = re.search(r"📊 Zabbix:\s*(.+)", text)
-    
     return {
         "is_success": is_success,
         "user": user_match.group(1).strip() if user_match else None,
@@ -93,17 +92,15 @@ async def wait_for_success(client_ip, original_message):
     await register_incident(client_ip, reason)
     for chat in TARGET_CHATS:
         try: await original_message.copy(chat)
-        except Exception as e: print(f"[!] Ошибка копирования в чат {chat}: {e}", flush=True)
+        except Exception as e: print(f"[!] Ошибка копирования в {chat}: {e}", flush=True)
     print(f"[ALLERT] {reason} | IP: {client_ip}", flush=True)
 
-@app.on_message(filters.chat(CHAT_ID)) 
+@app.on_message(filters.chat(LISTEN_CHATS)) 
 async def analyze_ssh_log(client, message):
     if not (message.from_user and message.from_user.is_bot): return 
-    
     text = message.text or message.caption or ""
     if not text: return
 
-    #SKIP_KEYWORDS = ["Cpanel_SSH_Actiivty", "WEB_SRC_Atak", "WEB_DST_Atak"]
     SKIP_KEYWORDS = ["Cpanel_SSH_Actiivty"]
     if any(key in text for key in SKIP_KEYWORDS):
         found_ip = re.search(r"(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})", text)
@@ -111,6 +108,16 @@ async def analyze_ssh_log(client, message):
             ip_val = found_ip.group(1)
             if ip_val in CPANEL_SKIP_IPS:
                 print(f"[log] игнор {ip_val} по системному ключу", flush=True)
+                return
+            else:
+                alert_reason = f"активность Cpanel с НЕИЗВЕСТНОГО IP: {ip_val}"
+                print(f"[!] АХТУНГ: {alert_reason}", flush=True)
+                await save_alert(alert_reason, text, ip_val)
+                for chat in TARGET_CHATS:
+                    try:
+                        await client.send_message(chat, f"***{alert_reason}***")
+                        await message.copy(chat)
+                    except Exception as e: print(f"[!] Ошибка отправки: {e}", flush=True)
                 return
 
     parsed = parse_ssh_message(text)
@@ -170,7 +177,7 @@ async def analyze_ssh_log(client, message):
             try:
                 await client.send_message(chat, f"***{alert_reason}***")
                 await message.copy(chat)
-            except Exception as e: print(f"[!] Ошибка отправки в чат {chat}: {e}", flush=True)
+            except Exception as e: print(f"[!] Ошибка в {chat}: {e}", flush=True)
 
 if __name__ == "__main__":
     print("Подключение к базе данных PostgreSQL...", flush=True)
@@ -182,6 +189,5 @@ if __name__ == "__main__":
     while True:
         try: app.run()
         except Exception as e:
-            print(f"Ошибка: {e}", flush=True)
             if "already waiting" in str(e): continue
             asyncio.sleep(5)
