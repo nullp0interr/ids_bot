@@ -249,7 +249,7 @@ async def analyze_ssh_log(client, message):
         if user not in IGNORE_BAD_IP_CLIENTS:
             if ip not in ALLOWED_IPS and not parsed["method_is_key"]:
                 if ip not in pending_checks:
-                    print(f"[*] Запуск таймера 60с для {ip}", flush=True)
+                    print(f"[*] Запуск таймера 60 сек для {ip}", flush=True)
                     task = asyncio.create_task(wait_for_success(ip, message))
                     pending_checks[ip] = task
 
@@ -271,7 +271,7 @@ async def start_bot():
     print("Бот запущен. Скан начат.", flush=True)
     
     # сообщениео успешном старте или перезапуске
-    startup_msg = "**Системное сообщение:** IDS Бот успешно запущен/перезагружен. Мониторинг логов активирован."
+    startup_msg = "IDS Бот успешно запущен/перезагружен"
     for chat in TARGET_CHAT:
         try:
             await app.send_message(chat, startup_msg)
@@ -282,7 +282,7 @@ async def start_bot():
     await idle()
     
     # сообщение при выключении контейнера
-    shutdown_msg = "**Системное сообщение:** IDS Бот остановлен (выключен контейнер). Мониторинг ПРЕРВАН."
+    shutdown_msg = "IDS БОТ остановлен (выключен контейнер)"
     for chat in TARGET_CHATS:
         try:
             await app.send_message(chat, shutdown_msg)
