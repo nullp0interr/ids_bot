@@ -92,10 +92,14 @@ def is_working_hours():
 async def wait_for_success(client_ip, original_message):
     await asyncio.sleep(60)
     reason = "[Инцидент]: нет успешной авторизации за 60 секунд после ошибки"
+    
     await save_alert(reason, original_message.text, client_ip)
     await register_incident(client_ip, reason)
+    
     for chat in TARGET_CHATS:
-        try: await original_message.copy(chat)
+        try: 
+            await client.send_message(chat, f"***{reason}***")
+            await original_message.copy(chat)
         except Exception as e: print(f"[!] Ошибка копирования в {chat}: {e}", flush=True)
     print(f"[ALLERT] {reason} | IP: {client_ip}", flush=True)
 
@@ -250,7 +254,7 @@ async def analyze_ssh_log(client, message):
             if ip not in ALLOWED_IPS and not parsed["method_is_key"]:
                 if ip not in pending_checks:
                     print(f"[*] Запуск таймера 60 сек для {ip}", flush=True)
-                    task = asyncio.create_task(wait_for_success(ip, message))
+                    task = asyncio.create_task(wait_for_success(client, ip, message))
                     pending_checks[ip] = task
 
     # ОТПРАВКА АЛЕРТА
