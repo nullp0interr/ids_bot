@@ -35,7 +35,8 @@ WATCH_LIST = {
     ("itcenter", "Confidens"): "контроль доступа itcenter на Confidens",
     ("itcenter_sergeym", "Sonodin-new"): "контроль доступа itcenter_sergeym на Sonodin-new",
     ("zruchna", "PBX-Ulc-LXC"): "контроль доступа zruchna на PBX-Ulc-LXC",
-    ("itcenter", "pbx-bydom-lxc"): "контроль доступа itcenter на pbx-bydom-lxc"
+    ("itcenter", "pbx-bydom-lxc"): "контроль доступа itcenter на pbx-bydom-lxc",
+    ("zruchna", "PBX-DPM_New-VM-mtscloud"): "контроль доступа zruchna на PBX-DPM_New-VM-mtscloud"
 }
 
 db_pool = None
