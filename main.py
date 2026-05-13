@@ -209,7 +209,7 @@ async def start_ansible_test(client, message):
     if message.chat.id in TARGET_CHATS or message.chat.id in LISTEN_CHATS:
         ansible_test_active = True
         ansible_test_results = {k: "NO" for k in ANSIBLE_TEST_LIST.keys()}
-        await message.reply_text(f"**тестирование запущено**\nжду сообщения от {len(ANSIBLE_TEST_LIST)} серверов.\n(не забыть) /test_stop")
+        await message.reply_text(f"**тестирование запущено**\жду сообщения от {len(ANSIBLE_TEST_LIST)} серверов\n(не забыть) /test_stop")
 
 @app.on_message(filters.command("test_stop"))
 async def stop_ansible_test(client, message):
@@ -217,16 +217,16 @@ async def stop_ansible_test(client, message):
     if message.chat.id in TARGET_CHATS or message.chat.id in LISTEN_CHATS:
         ansible_test_active = False
         
-        report = "**отчет по тестированию**\n\n"
+        report = "**Отчет по тестированию ANSIBLE:**\n\n"
         ok_count = 0
         for zabbix, status in ansible_test_results.items():
             if status == "OK":
-                report += f"{zabbix}  ✅ (прошел)\n"
+                report += f" {zabbix} ✅ (прошел)\n"
                 ok_count += 1
             else:
-                report += f"{zabbix}  ❌ (не прошел)\n"
+                report += f"{zabbix} ❌ (не прошел)\n"
                 
-        report += f"\n**Итого:** Успешно {ok_count} из {len(ANSIBLE_TEST_LIST)}."
+        report += f"\n**Итого**\n Успешно {ok_count} из {len(ANSIBLE_TEST_LIST)}."
         await message.reply_text(report)
 
 # ================= ПАРСЕР ЛОГОВ =================
@@ -247,7 +247,7 @@ async def analyze_ssh_log(client, message):
                 print(f"[log] Игнор одиночной Atak_ от {attack_ip} (в списке исключений ATAK_SKIP_IPS)", flush=True)
                 return
 
-            alert_reason = f"🚨 [Инцидент] 🚨 \n Зафиксирована SSH активность с IP: {attack_ip}"
+            alert_reason = f"[Инцидент]: Зафиксирована SSH активность с IP: {attack_ip}"
             print(f"[!] АХТУНГ: {alert_reason}", flush=True)
             
             await save_alert(alert_reason, text, attack_ip)
@@ -272,7 +272,7 @@ async def analyze_ssh_log(client, message):
 
             zabbix_node = text.strip().split('\n')[0].strip()
             
-            print(f"[*] Запуск таймера 60 сек для атаки SRC IP: {src_ip} (узел {zabbix_node})", flush=True)
+            print(f"[*] Запуск таймера 60с для атаки SRC IP: {src_ip} (узел {zabbix_node})", flush=True)
             task = asyncio.create_task(wait_for_atak_resolution(client, src_ip, message))
             pending_attacks[zabbix_node] = task
         return 
@@ -333,13 +333,23 @@ async def analyze_ssh_log(client, message):
     if parsed["is_success"]:
         last_success_time[ip] = datetime.now().timestamp()
         
-        # --- БЛОК ТЕСТИРОВАНИЯ ANSIBLE ---
+        # ================= БЛОК ТЕСТИРОВАНИЯ ANSIBLE (ЛОГИКА "ИЛИ") =================
         if ansible_test_active:
             s_ip = parsed.get("server_ip")
-            if zabbix_name in ANSIBLE_TEST_LIST and ANSIBLE_TEST_LIST[zabbix_name] == s_ip:
-                ansible_test_results[zabbix_name] = "OK"
-                print(f"[TEST] Зафиксирован успешный вход: {zabbix_name} ({s_ip})", flush=True)
-        # ----------------------------------
+            matched_key = None
+            
+            if zabbix_name in ANSIBLE_TEST_LIST:
+                matched_key = zabbix_name
+            else:
+                for k, v in ANSIBLE_TEST_LIST.items():
+                    if v == s_ip:
+                        matched_key = k
+                        break
+                        
+            if matched_key:
+                ansible_test_results[matched_key] = "OK"
+                print(f"[TEST] Успех: {matched_key} (Лог Zabbix: {zabbix_name}, IP: {s_ip})", flush=True)
+        # ============================================================================
         
         if ip in pending_checks:
             pending_checks[ip].cancel()
@@ -367,7 +377,7 @@ async def analyze_ssh_log(client, message):
         if pair in WATCH_LIST:
             print(f"[whatch_list]: {WATCH_LIST[pair]} [НЕУДАЧА]", flush=True)
             if ip not in pending_checks:
-                print(f"[*] Запуск таймера 60 сек для WATCH_LIST ({ip})", flush=True)
+                print(f"[*] Запуск таймера 60с для WATCH_LIST ({ip})", flush=True)
                 task = asyncio.create_task(wait_for_watchlist_success(client, ip, message, WATCH_LIST[pair]))
                 pending_checks[ip] = task
             return
