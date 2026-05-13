@@ -148,6 +148,29 @@ async def analyze_ssh_log(client, message):
     text = message.text or message.caption or ""
     if not text: return
 
+    if "Atak_" in text and "WEB_SRC_Atak_" not in text and "WEB_DST_Atak_" not in text:
+        found_ip = re.search(r"Atak_(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})", text)
+        if found_ip:
+            attack_ip = found_ip.group(1)
+            
+            if attack_ip in ATAK_SKIP_IPS:
+                print(f"[log] Игнор одиночной Atak_ от {attack_ip} (в списке исключений ATAK_SKIP_IPS)", flush=True)
+                return
+
+            alert_reason = f"🚨 [Инцидент]: Зафиксирована SSH активность с IP: {attack_ip}"
+            print(f"[!] АХТУНГ: {alert_reason}", flush=True)
+            
+            await save_alert(alert_reason, text, attack_ip)
+            await register_incident(attack_ip, alert_reason)
+            
+            for chat in TARGET_CHATS:
+                try:
+                    await client.send_message(chat, f"***{alert_reason}***")
+                    await message.copy(chat)
+                except Exception as e: 
+                    print(f"[!] Ошибка отправки: {e}", flush=True)
+        return
+        
     if "WEB_SRC_Atak_" in text:
         found_ip = re.search(r"WEB_SRC_Atak_(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})", text)
         if found_ip:
