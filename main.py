@@ -8,7 +8,7 @@ from pyrogram import Client, filters
 
 load_dotenv()
 
-# секреты
+# Секреты
 API_ID = int(os.getenv("API_ID", 0))
 API_HASH = os.getenv("API_HASH")
 ALERT_CHAT_ID = int(os.getenv("ALERT_CHAT_ID", 0))
@@ -37,11 +37,68 @@ WATCH_LIST = {
     ("zruchna", "PBX-DPM_New-VM-mtscloud"): "контроль доступа zruchna на PBX-DPM_New-VM-mtscloud"
 }
 
+# --- СПИСОК ДЛЯ ТЕСТА ANSIBLE ---
+ANSIBLE_TEST_LIST = {
+    "100kotlov-NewSys": "172.17.85.124",
+    "AGS-PBX-SYS": "172.17.85.180",
+    "AstikonSnab-VM": "172.17.85.61",
+    "AutoDrug-92": "172.17.85.2",
+    "BamService-VM": "172.17.85.118",
+    "beau-universe": "172.17.85.29",
+    "BelAgroVetFarm-Sys": "172.17.85.108",
+    "BelAuditAlliance": "172.17.85.96",
+    "BelSemTorgPlus-SYS": "172.17.85.101",
+    "Clinica-ZZ-VM": "172.17.85.100",
+    "Dipper-SYS": "172.17.85.30",
+    "Evrolombard-SYS": "172.17.85.119",
+    "Fabrika-Mamka-MSK": "172.17.85.5",
+    "FaraonTrade": "172.17.85.131",
+    "Furniland-SYS": "172.17.85.51",
+    "Germestrast-okko": "172.17.85.55",
+    "Gira-SYS": "172.17.85.83",
+    "Hypervisor-RichKargo-Proxmox": "172.17.85.179",
+    "IkonMarket-SYS": "172.17.85.77",
+    "Inho-BecloudVM": "172.17.85.112",
+    "IpMakarchuk-FerstRFATS": "172.17.85.137",
+    "Kryshnya": "172.17.85.82",
+    "Ladgorna-SYS": "172.17.85.66",
+    "Lkon-sys": "172.17.85.27",
+    "LXD-Levada_Airon-VM": "172.17.85.216",
+    "Mediluks-new": "172.17.85.35",
+    "Mejarol-Sys": "172.17.85.64",
+    "MindiBy-Vm": "172.17.85.88",
+    "Mysql-Levada_Airon-VM": "172.17.85.218",
+    "PBX-11labs-VM": "172.17.85.123",
+    "PBX-Alisveta-SYS": "172.17.85.174",
+    "PBX-Amiko-SYS": "172.17.85.129",
+    "PBX-AnitaBy-SYS": "172.17.85.219",
+    "PBX-Antarion-VM": "172.17.85.144",
+    "PBX-AnutaDent-VM": "172.17.85.54",
+    "PBX-Armis-VM": "172.17.85.193",
+    "PBX-AsiaTradeRF-Cloud": "172.17.85.221",
+    "PBX-Asystent_Service-SYS": "172.17.85.197",
+    "PBX-AutoStrong-RB-VM": "172.17.85.214",
+    "PBX-AutoStrong-RF-VM": "172.17.85.215",
+    "PBX-BabyBoss-SYS": "172.17.85.147",
+    "PBX-BelarusTorg-SYS": "172.17.85.38",
+    "PBX-BelKuhni-SYS": "172.17.85.184",
+    "PBX-Belmotors-SYS": "172.17.85.201",
+    "PBX-Bemotors-FerstRF": "172.17.85.227",
+    "PBX-Blk7-SYS": "172.17.85.124",
+    "PBX-Cezar-KZ-Cloud": "172.17.85.75",
+    "PBX-ComplexMedia-Cloud": "172.17.85.203",
+    "PBX-D-Prodact-VM": "172.17.85.46",
+    "PBX-DPM_New-VM-mtscloud": "172.17.85.110"
+}
+
 db_pool = None
 failed_attempts = {} 
 pending_checks = {}  
 pending_attacks = {}
 last_success_time = {} # время последнего успешного входа по IP
+
+ansible_test_active = False
+ansible_test_results = {}
 
 app = Client("my_account", api_id=API_ID, api_hash=API_HASH)
 
@@ -72,12 +129,14 @@ def parse_ssh_message(text):
     is_success = "SSH-авторизация" in text
     user_match = re.search(r"👤 Пользователь:\s*(.+)", text)
     ip_match = re.search(r"🌍 Клиент:\s*(.+)", text)
+    server_ip_match = re.search(r"🖥 Сервер:\s*(.+)", text)
     method_match = re.search(r"🔑 Метод:\s*(.+)", text)
     zabbix_match = re.search(r"📊 Zabbix:\s*(.+)", text)
     return {
         "is_success": is_success,
         "user": user_match.group(1).strip() if user_match else None,
         "ip": ip_match.group(1).strip() if ip_match else None,
+        "server_ip": server_ip_match.group(1).strip() if server_ip_match else None,
         "method_is_key": "ключ" in method_match.group(1).lower() if method_match else False,
         "zabbix_name": zabbix_match.group(1).strip() if zabbix_match else None
     }
@@ -130,24 +189,55 @@ async def wait_for_atak_resolution(client, src_ip, original_message):
         except Exception as e: print(f"[!] Ошибка алерта атаки в {chat}: {e}", flush=True)
     print(f"[ALLERT] {reason} | IP: {src_ip}", flush=True)
 
+# ================= КОМАНДЫ =================
+
 @app.on_message(filters.command(["status", "ping"]))
 async def check_bot_status(client, message):
     if message.chat.id in TARGET_CHATS or message.chat.id in LISTEN_CHATS:
         uptime_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         await message.reply_text(
-            f"**[ СТАТУС: БОТ АКТИВЕН ]**\n"
+            f"[ СТАТУС: БОТ АКТИВЕН ]\n"
             f"Время на сервере: {uptime_time}\n"
             f"Слушаю чатов: {len(LISTEN_CHATS)}\n"
             f"Шлю алерты в чатов: {len(TARGET_CHATS)}\n"
             f"Мониторинг логов активен"
         )
+
+@app.on_message(filters.command("test_start"))
+async def start_ansible_test(client, message):
+    global ansible_test_active, ansible_test_results
+    if message.chat.id in TARGET_CHATS or message.chat.id in LISTEN_CHATS:
+        ansible_test_active = True
+        ansible_test_results = {k: "NO" for k in ANSIBLE_TEST_LIST.keys()}
+        await message.reply_text(f"**тестирование запущено**\nжду сообщения от {len(ANSIBLE_TEST_LIST)} серверов.\n(не забыть) /test_stop")
+
+@app.on_message(filters.command("test_stop"))
+async def stop_ansible_test(client, message):
+    global ansible_test_active, ansible_test_results
+    if message.chat.id in TARGET_CHATS or message.chat.id in LISTEN_CHATS:
+        ansible_test_active = False
         
+        report = "**отчет по тестированию**\n\n"
+        ok_count = 0
+        for zabbix, status in ansible_test_results.items():
+            if status == "OK":
+                report += f"{zabbix}  ✅ (прошел)\n"
+                ok_count += 1
+            else:
+                report += f"{zabbix}  ❌ (не прошел)\n"
+                
+        report += f"\n**Итого:** Успешно {ok_count} из {len(ANSIBLE_TEST_LIST)}."
+        await message.reply_text(report)
+
+# ================= ПАРСЕР ЛОГОВ =================
+
 @app.on_message(filters.chat(LISTEN_CHATS)) 
 async def analyze_ssh_log(client, message):
     if not (message.from_user and message.from_user.is_bot): return 
     text = message.text or message.caption or ""
     if not text: return
 
+    # Одиночные атаки
     if "Atak_" in text and "WEB_SRC_Atak_" not in text and "WEB_DST_Atak_" not in text:
         found_ip = re.search(r"Atak_(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})", text)
         if found_ip:
@@ -157,7 +247,7 @@ async def analyze_ssh_log(client, message):
                 print(f"[log] Игнор одиночной Atak_ от {attack_ip} (в списке исключений ATAK_SKIP_IPS)", flush=True)
                 return
 
-            alert_reason = f"🚨 [Инцидент]: Зафиксирована SSH активность с IP: {attack_ip}"
+            alert_reason = f"🚨 [Инцидент] 🚨 \n Зафиксирована SSH активность с IP: {attack_ip}"
             print(f"[!] АХТУНГ: {alert_reason}", flush=True)
             
             await save_alert(alert_reason, text, attack_ip)
@@ -169,7 +259,7 @@ async def analyze_ssh_log(client, message):
                     await message.copy(chat)
                 except Exception as e: 
                     print(f"[!] Ошибка отправки: {e}", flush=True)
-        return
+        return 
         
     if "WEB_SRC_Atak_" in text:
         found_ip = re.search(r"WEB_SRC_Atak_(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})", text)
@@ -182,7 +272,7 @@ async def analyze_ssh_log(client, message):
 
             zabbix_node = text.strip().split('\n')[0].strip()
             
-            print(f"[*] Запуск таймера 60с для атаки SRC IP: {src_ip} (узел {zabbix_node})", flush=True)
+            print(f"[*] Запуск таймера 60 сек для атаки SRC IP: {src_ip} (узел {zabbix_node})", flush=True)
             task = asyncio.create_task(wait_for_atak_resolution(client, src_ip, message))
             pending_attacks[zabbix_node] = task
         return 
@@ -243,6 +333,14 @@ async def analyze_ssh_log(client, message):
     if parsed["is_success"]:
         last_success_time[ip] = datetime.now().timestamp()
         
+        # --- БЛОК ТЕСТИРОВАНИЯ ANSIBLE ---
+        if ansible_test_active:
+            s_ip = parsed.get("server_ip")
+            if zabbix_name in ANSIBLE_TEST_LIST and ANSIBLE_TEST_LIST[zabbix_name] == s_ip:
+                ansible_test_results[zabbix_name] = "OK"
+                print(f"[TEST] Зафиксирован успешный вход: {zabbix_name} ({s_ip})", flush=True)
+        # ----------------------------------
+        
         if ip in pending_checks:
             pending_checks[ip].cancel()
             del pending_checks[ip]
@@ -259,7 +357,7 @@ async def analyze_ssh_log(client, message):
 
     # ЛОГИКА НЕУДАЧНОЙ АВТОРИЗАЦИИ 
     else:
-        # ИМУННИТЕТ НА 5 МИНУТ если этот IP успешно заходил менее 5 минут назад (300 сек) игнорим опечатки
+        # ИММУНИТЕТ НА 5 МИНУТ если этот IP успешно заходил менее 5 минут назад (300 сек) игнорим опечатки
         if ip in last_success_time and (datetime.now().timestamp() - last_success_time[ip]) < 300:
             print(f"[log] Игнор ошибки для {ip}: пользователь уже сидит на сервере (успех менее 5 мин назад)", flush=True)
             return
@@ -269,7 +367,7 @@ async def analyze_ssh_log(client, message):
         if pair in WATCH_LIST:
             print(f"[whatch_list]: {WATCH_LIST[pair]} [НЕУДАЧА]", flush=True)
             if ip not in pending_checks:
-                print(f"[*] Запуск таймера 60с для WATCH_LIST ({ip})", flush=True)
+                print(f"[*] Запуск таймера 60 сек для WATCH_LIST ({ip})", flush=True)
                 task = asyncio.create_task(wait_for_watchlist_success(client, ip, message, WATCH_LIST[pair]))
                 pending_checks[ip] = task
             return
