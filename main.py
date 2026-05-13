@@ -227,9 +227,9 @@ async def stop_ansible_test(client, message):
         )
         
         if fail_count > 0:
-            report_text += "В прикрепленном Excel-файле список серверов, которые не прошли проверку."
+            report_text += "Сформирован отчет с тестами которые не прошли."
         else:
-            report_text += "Все сервера отработали идеально!"
+            report_text += "Тест успешно отработал (100% покрытие)"
             
         # механика генерации отчета
         report_filename = f"report_{datetime.now().strftime('%Y-%m-%d_%H-%M')}.xlsx"
