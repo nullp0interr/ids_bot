@@ -5,7 +5,7 @@ import asyncpg
 from dotenv import load_dotenv
 from datetime import datetime
 from pyrogram import Client, filters
-
+from excel_reporter import generate_ansible_report
 load_dotenv()
 
 # Секреты
@@ -37,7 +37,6 @@ WATCH_LIST = {
     ("zruchna", "PBX-DPM_New-VM-mtscloud"): "контроль доступа zruchna на PBX-DPM_New-VM-mtscloud"
 }
 
-# --- СПИСОК ДЛЯ ТЕСТА ANSIBLE ---
 ANSIBLE_TEST_LIST = {
     "100kotlov-NewSys": "172.17.85.124",
     "AGS-PBX-SYS": "172.17.85.180",
@@ -209,7 +208,7 @@ async def start_ansible_test(client, message):
     if message.chat.id in TARGET_CHATS or message.chat.id in LISTEN_CHATS:
         ansible_test_active = True
         ansible_test_results = {k: "NO" for k in ANSIBLE_TEST_LIST.keys()}
-        await message.reply_text(f"**тестирование запущено**\жду сообщения от {len(ANSIBLE_TEST_LIST)} серверов\n(не забыть) /test_stop")
+        await message.reply_text(f"**тестирование запущено**\nжду сообщения от {len(ANSIBLE_TEST_LIST)} серверов\n(не забыть) /test_stop")
 
 @app.on_message(filters.command("test_stop"))
 async def stop_ansible_test(client, message):
@@ -217,17 +216,35 @@ async def stop_ansible_test(client, message):
     if message.chat.id in TARGET_CHATS or message.chat.id in LISTEN_CHATS:
         ansible_test_active = False
         
-        report = "**Отчет по тестированию ANSIBLE:**\n\n"
-        ok_count = 0
-        for zabbix, status in ansible_test_results.items():
-            if status == "OK":
-                report += f" {zabbix} ✅ (прошел)\n"
-                ok_count += 1
-            else:
-                report += f"{zabbix} ❌ (не прошел)\n"
-                
-        report += f"\n**Итого**\n Успешно {ok_count} из {len(ANSIBLE_TEST_LIST)}."
-        await message.reply_text(report)
+        # Формируем текст
+        ok_count = list(ansible_test_results.values()).count("OK")
+        fail_count = len(ansible_test_results) - ok_count
+        
+        report_text = (
+            f"**Тестирование завершено**\n"
+            f"Успешных тестов: {ok_count}\n"
+            f"Не прошли тест: {fail_count}\n\n"
+        )
+        
+        if fail_count > 0:
+            report_text += "В прикрепленном Excel-файле список серверов, которые не прошли проверку."
+        else:
+            report_text += "Все сервера отработали идеально!"
+            
+        # механика генерации отчета
+        report_filename = f"report_{datetime.now().strftime('%Y-%m-%d_%H-%M')}.xlsx"
+        generate_ansible_report(ansible_test_results, ANSIBLE_TEST_LIST, report_filename)
+        
+        # отправка сообщения в тг 
+        await client.send_document(
+            chat_id=message.chat.id,
+            document=report_filename,
+            caption=report_text
+        )
+        
+        # удаление файла из сервера
+        if os.path.exists(report_filename):
+            os.remove(report_filename)
 
 # ================= ПАРСЕР ЛОГОВ =================
 
